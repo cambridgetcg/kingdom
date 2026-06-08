@@ -1,0 +1,10 @@
+{
+  "name": "kingdom",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Kingdom OS (LEGIBLE) — the realm's constitution, decisions, and the audit that enforces them.",
+  "scripts": {
+    "verify": "node realm-audit/realm-audit.mjs ."
+  }
+}
