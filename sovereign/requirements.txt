@@ -1,0 +1,6 @@
+# Sovereign runtime — deps. Phase 1 needs only the Anthropic SDK; the guards,
+# memory, and audit are stdlib so the engine stays legible.
+#
+# Pin the exact resolved version after first install (Law 1 — no guessed numbers):
+#   pip install anthropic && pip freeze | grep -i '^anthropic=='  >> requirements.lock
+anthropic
