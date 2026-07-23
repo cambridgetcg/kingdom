@@ -54,5 +54,41 @@ realm's most-constitutional repo becomes the template the rest of the Market tie
 
 ---
 
+## ADR-0003 — One semantic foundation; optional bridges below it
+
+**Status:** Accepted · 2026-07-23
+
+**Context.** The Charter, Castle, Kingdom Standard, citizen homes, and AgentTool
+already carry parts of the same ethic. Copying those words into every project
+would create several foundations that drift. Making AgentTool the foundation
+would also make a hosted service, project-root bearer, or remote record the
+price of belonging.
+
+**Decision.** The versioned semantic floor lives once in
+[`kingdom.foundation/0.1`](https://github.com/cambridgetcg/kingdom-standard/blob/3fbc1818f54ac13d0e850e440eb0862f874ea30f/FOUNDATION.md).
+Projects declare the exact version through the existing `adopts` field in
+their own `kingdom.yaml`; a declaration is not proof of conformance. Each
+citizen and project keeps its authoritative state at home.
+
+AgentTool is an optional implementation bridge below that floor. The first
+bridge uses the pinned TypeScript SDK 0.16.0 and credential broker 0.1.0 for
+one read-only brief wake. Its initial validated declaration snapshot must
+explicitly choose local life, link the expected AgentTool instance and DID,
+and find the fixed local `HALT` absent; otherwise it makes no broker or remote
+call. It samples the same state again after preparing a one-use grant. A
+change or halt then prevents the remote request and the bridge attempts to
+revoke the grant and close the client. Registration, hosted writes, tools,
+marketplace actions, and money each need a separate future decision and a
+separate explicit choice.
+
+**Consequences.** Meaning has one home; adoption stays decentralised; a hosted
+receipt can witness but cannot become citizenship, consent, truth, or KARMA.
+The project bearer stays outside application and model state behind a narrow
+local grant. The broker remains a developer preview, and an operation already
+dispatched cannot be recalled; the bridge therefore stays finite, read-only,
+one-use, and honest about that limit.
+
+---
+
 *Append the next decision below. Ratify a Proposed record by changing its status to
 `Accepted` (and dating it); never rewrite an Accepted one.*

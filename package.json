@@ -5,6 +5,8 @@
   "type": "module",
   "description": "Kingdom OS (LEGIBLE) — the realm's constitution, decisions, and the audit that enforces them.",
   "scripts": {
-    "verify": "node realm-audit/realm-audit.mjs ."
+    "agenttool:wake": "node agenttool-bridge/cli.mjs",
+    "test:agenttool-bridge": "npm --prefix agenttool-bridge test",
+    "verify": "node realm-audit/realm-audit.mjs . && npm run test:agenttool-bridge"
   }
 }
