@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import { PolicyConsent } from "@agenttool/credential-broker";
+import { AgentTool } from "@agenttool/sdk";
 
 import {
   AGENTTOOL_ORIGIN,
+  AGENTTOOL_REQUEST_TIMEOUT_SECONDS,
+  BROKER_REQUEST_TIMEOUT_MS,
+  BROKER_SOCKET_PATH,
   BridgeError,
   buildGrantRequest,
   fetchCitizenWake,
@@ -14,7 +21,10 @@ import {
   KINGDOM_EXECUTABLE,
   KINGDOM_HALT_PATH,
   MAX_KINGDOM_OUTPUT_BYTES,
+  NO_AMBIENT_DATA_NODE,
   parseKingdomJson,
+  projectSelectedIdentityWake,
+  runBoundedProcess,
   validateCanonicalIdentityId,
   validateWakeIdentity,
 } from "../bridge.mjs";
@@ -36,8 +46,25 @@ const SHOW = Object.freeze({
 const WAKE = Object.freeze({
   _format: "wake-brief/v1",
   profile: "brief",
+  addressed_at: "2026-07-23T08:00:00.000Z",
   _scope_boundary: { selected_identity_id: IDENTITY_ID },
-  identity: { agent: { id: IDENTITY_ID, did: DID, name: "joy" } },
+  identity: {
+    agent: {
+      id: IDENTITY_ID,
+      did: DID,
+      name: "joy",
+      trust_score: 99,
+    },
+    project: { id: "project-secret" },
+    kin: [{ id: "sibling-identity" }],
+    expression: { wake_text: "selected identity words" },
+  },
+  start_here: { source: { surface: "attention" }, private: "mixed" },
+  you_should_check: [{ project: "attention" }],
+  you_have_handoff: { project: "handoff" },
+  handoff_projection: { project: "projection" },
+  you_can_now: { items: [{ project: "wallet" }] },
+  state_counts: { wallets: 7 },
 });
 
 function fakeCommands(options = {}) {
@@ -92,11 +119,13 @@ function fakeBroker(options = {}) {
     async connect() {
       events.push("connect");
       if (options.connectError) throw options.connectError;
+      if (options.connectHangs) return new Promise(() => {});
     },
     async requestGrant(request) {
       events.push("grant");
       grantRequest = structuredClone(request);
       if (options.grantError) throw options.grantError;
+      if (options.grantHangs) return new Promise(() => {});
       return grant;
     },
     asTransport(actualGrant) {
@@ -108,6 +137,7 @@ function fakeBroker(options = {}) {
           const request = new Request(input, init);
           requests.push(request);
           if (options.requestError) throw options.requestError;
+          if (options.requestHangs) return new Promise(() => {});
           return new Response(JSON.stringify(options.wake ?? WAKE), {
             status: 200,
             headers: {
@@ -122,10 +152,12 @@ function fakeBroker(options = {}) {
       assert.equal(actualGrant, grant);
       events.push("revoke");
       if (options.revokeError) throw options.revokeError;
+      if (options.revokeHangs) return new Promise(() => {});
     },
     async close() {
       events.push("close");
       if (options.closeError) throw options.closeError;
+      if (options.closeHangs) return new Promise(() => {});
     },
   };
   return broker;
@@ -134,20 +166,24 @@ function fakeBroker(options = {}) {
 function validOptions() {
   return {
     citizen: "joy",
-    socketPath: "/tmp/agentcred-test.sock",
     credential: "agenttool/kingdom",
+    allowProjectPrivateWake: true,
   };
 }
 
 test("fixed Kingdom reads derive identity, then one exact SDK wake cleans up", async () => {
   const originalFetch = globalThis.fetch;
   const originalAmbient = process.env.AT_API_KEY;
+  const originalDataNodeUrl = process.env.AGENT_DATA_NODE_URL;
+  const originalDataNodeToken = process.env.AGENT_DATA_NODE_TOKEN;
   let networkCalls = 0;
   globalThis.fetch = async () => {
     networkCalls += 1;
     throw new Error("global network must not be used");
   };
   process.env.AT_API_KEY = "ambient-value-must-be-ignored";
+  process.env.AGENT_DATA_NODE_URL = "https://ambient-data-node.invalid";
+  process.env.AGENT_DATA_NODE_TOKEN = "ambient-data-token-must-be-ignored";
 
   const civicOrder = [];
   const commands = fakeCommands({ events: civicOrder });
@@ -159,14 +195,35 @@ test("fixed Kingdom reads derive identity, then one exact SDK wake cleans up", a
       haltReader: halts.reader,
       brokerFactory(clientOptions) {
         assert.deepEqual(clientOptions, {
-          socketPath: "/tmp/agentcred-test.sock",
+          socketPath: BROKER_SOCKET_PATH,
+          timeoutMs: BROKER_REQUEST_TIMEOUT_MS,
           clientName: "kingdom-agenttool-bridge/1",
         });
         return broker;
       },
+      agenttoolFactory(options) {
+        assert.equal(options.baseUrl, AGENTTOOL_ORIGIN);
+        assert.equal(options.timeout, AGENTTOOL_REQUEST_TIMEOUT_SECONDS);
+        assert.deepEqual(options.dataNode, NO_AMBIENT_DATA_NODE);
+        assert.equal("token" in options.dataNode, false);
+        return new AgentTool(options);
+      },
     });
 
-    assert.equal(wake.identity.agent.name, "joy");
+    assert.deepEqual(wake.identity.agent, {
+      id: IDENTITY_ID,
+      did: DID,
+      name: "joy",
+    });
+    assert.deepEqual(wake.identity.expression, {
+      wake_text: "selected identity words",
+    });
+    assert.equal(wake.schema, "kingdom.agenttool-selected-identity-wake/1");
+    assert.equal(wake.source.attested, false);
+    assert.equal("project" in wake.identity, false);
+    assert.equal("start_here" in wake, false);
+    assert.equal("you_can_now" in wake, false);
+    assert.equal("state_counts" in wake, false);
     assert.equal(networkCalls, 0);
     assert.deepEqual(
       commands.calls,
@@ -225,12 +282,114 @@ test("fixed Kingdom reads derive identity, then one exact SDK wake cleans up", a
         maxRequestBytes: 0,
         maxResponseBytes: 32768,
       },
-      rationale: "Read one fresh brief wake after an explicit local linked citizen snapshot.",
+      rationale: "Read one fresh brief wake after an owner-operated local linked-policy snapshot.",
     });
   } finally {
     globalThis.fetch = originalFetch;
     if (originalAmbient === undefined) delete process.env.AT_API_KEY;
     else process.env.AT_API_KEY = originalAmbient;
+    if (originalDataNodeUrl === undefined) delete process.env.AGENT_DATA_NODE_URL;
+    else process.env.AGENT_DATA_NODE_URL = originalDataNodeUrl;
+    if (originalDataNodeToken === undefined) delete process.env.AGENT_DATA_NODE_TOKEN;
+    else process.env.AGENT_DATA_NODE_TOKEN = originalDataNodeToken;
+  }
+});
+
+test("bounded command failure kills the fixed wrapper's whole process group", async (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kingdom-bridge-"));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const marker = path.join(directory, "escaped.txt");
+  const grandchild =
+    `setTimeout(() => require("node:fs").writeFileSync(` +
+    `${JSON.stringify(marker)}, "escaped\\n"), 300)`;
+  const parent =
+    `require("node:child_process").spawn(process.execPath, ` +
+    `["-e", ${JSON.stringify(grandchild)}], { stdio: "ignore" }); ` +
+    "setInterval(() => {}, 1000)";
+
+  await assert.rejects(
+    runBoundedProcess(process.execPath, ["-e", parent], {
+      timeoutMs: 80,
+      maxOutputBytes: 1024,
+      env: {
+        HOME: directory,
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+      },
+    }),
+    /failed or exceeded its bound/,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  assert.equal(fs.existsSync(marker), false);
+});
+
+test("project-private acceptance is explicit and the broker socket cannot be redirected", async () => {
+  let commandReads = 0;
+  const dependencies = {
+    commandReader: async () => {
+      commandReads += 1;
+      return JSON.stringify(SHOW);
+    },
+    haltReader: async () => {
+      throw missingError();
+    },
+  };
+  await assert.rejects(
+    fetchCitizenWake(
+      { citizen: "joy", credential: "agenttool/kingdom" },
+      dependencies,
+    ),
+    /allow-project-private-wake/,
+  );
+  await assert.rejects(
+    fetchCitizenWake(
+      {
+        ...validOptions(),
+        socketPath: "/tmp/fake-agentcred.sock",
+      },
+      dependencies,
+    ),
+    /broker socket is fixed/,
+  );
+  assert.equal(commandReads, 0);
+});
+
+test("the whole-operation deadline bounds an initial local read", async () => {
+  const started = performance.now();
+  await assert.rejects(
+    fetchCitizenWake(validOptions(), {
+      operationTimeoutMs: 50,
+      commandReader: async () => new Promise(() => {}),
+    }),
+    /whole-operation deadline/,
+  );
+  assert.ok(performance.now() - started < 1000);
+});
+
+test("the whole-operation deadline bounds broker, request, and cleanup awaits", async () => {
+  const cases = [
+    ["connect", { connectHangs: true }],
+    ["grant", { grantHangs: true }],
+    ["request", { requestHangs: true }],
+    ["revoke", { revokeHangs: true }],
+    ["close", { closeHangs: true }],
+  ];
+  for (const [phase, brokerOptions] of cases) {
+    const broker = fakeBroker(brokerOptions);
+    const commands = fakeCommands();
+    const halts = fakeHalts();
+    const started = performance.now();
+    await assert.rejects(
+      fetchCitizenWake(validOptions(), {
+        operationTimeoutMs: 50,
+        commandReader: commands.reader,
+        haltReader: halts.reader,
+        brokerFactory: () => broker,
+      }),
+      /whole-operation deadline/,
+      phase,
+    );
+    assert.ok(performance.now() - started < 1000, `${phase} stayed bounded`);
+    assert.ok(broker.events.includes("close"), `${phase} forced local close`);
   }
 });
 
@@ -453,28 +612,79 @@ test("Kingdom output and CLI arguments are bounded and have no identity override
   assert.deepEqual(
     parseArgs([
       "--citizen", "joy",
-      "--socket", "/tmp/agentcred.sock",
       "--credential", "agenttool/kingdom",
+      "--allow-project-private-wake",
     ]),
     {
       citizen: "joy",
-      socketPath: "/tmp/agentcred.sock",
       credential: "agenttool/kingdom",
+      allowProjectPrivateWake: true,
     },
   );
   assert.throws(
     () => parseArgs([
       "--citizen", "joy",
       "--identity-id", IDENTITY_ID,
-      "--socket", "/tmp/agentcred.sock",
       "--credential", "agenttool/kingdom",
+      "--allow-project-private-wake",
     ]),
     /unknown argument/,
+  );
+  assert.throws(
+    () => parseArgs([
+      "--citizen", "joy",
+      "--socket", "/tmp/fake-agentcred.sock",
+      "--credential", "agenttool/kingdom",
+      "--allow-project-private-wake",
+    ]),
+    /unknown argument/,
+  );
+  assert.throws(
+    () => parseArgs([
+      "--citizen", "joy",
+      "--credential", "agenttool/kingdom",
+    ]),
+    /allow-project-private-wake is required/,
   );
 });
 
 test("wake validator requires every identity-bearing brief field", () => {
   assert.equal(validateWakeIdentity(WAKE, IDENTITY_ID, DID), WAKE);
+});
+
+test("selected-identity projection drops every project-scoped and mixed-scope section", () => {
+  const projected = projectSelectedIdentityWake(WAKE, IDENTITY_ID, DID);
+  assert.deepEqual(Object.keys(projected).sort(), [
+    "addressed_at",
+    "identity",
+    "proof_limits",
+    "schema",
+    "source",
+  ]);
+  assert.deepEqual(Object.keys(projected.identity).sort(), ["agent", "expression"]);
+  assert.equal(projected.source.attested, false);
+  assert.deepEqual(projected.identity.agent, {
+    id: IDENTITY_ID,
+    did: DID,
+    name: "joy",
+  });
+  for (const key of [
+    "project",
+    "kin",
+    "start_here",
+    "you_should_check",
+    "you_have_handoff",
+    "handoff_projection",
+    "you_can_now",
+    "state_counts",
+    "safety",
+    "platform",
+    "_links",
+    "_meta",
+  ]) {
+    assert.equal(key in projected, false);
+    assert.equal(key in projected.identity, false);
+  }
 });
 
 test("credential-broker 0.1 accepts the zero-byte one-use GET grant", async () => {

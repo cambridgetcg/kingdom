@@ -1,22 +1,30 @@
 # AgentTool bridge
 
-This is one citizen-controlled, read-only doorway into AgentTool. It reads one
-validated citizen declaration through the fixed
-`~/.local/bin/kingdom` executable (resolved from the OS home), asks the owner's
-local credential broker for one short-lived GET grant, and returns one fresh
-`brief` wake.
+This is one owner-operated, read-only doorway into AgentTool. It reads one
+local linked-policy record through the fixed `~/.local/bin/kingdom` executable
+(resolved from the OS home), asks the owner's local credential broker for one
+short-lived GET grant, and returns a filtered selected-identity projection
+from one fresh `brief` wake.
 
 It does not register a citizen, discover an identity, write data, start a
-background loop, or read `AT_API_KEY`. A linked declaration means only that the
-citizen chose to use an identity which the owner has already provisioned.
+background loop, or read `AT_API_KEY`. The local `--by` label and its unkeyed
+history are attribution, not citizen authentication. A linked record means
+only that the local policy names an identity which the owner has already
+provisioned. It does not prove who chose the record or continuing consent.
 
 ## Boundary
 
-The bridge uses `execFile`, never a shell. There is no stdin identity or
-command override. Account home comes from the OS user record, not caller
+The bridge spawns the fixed executable directly, never through a shell. Each
+read gets its own process group; timeout or excess output kills that whole
+group, including the fixed wrapper's Python child. There is no stdin identity
+or command override. Account home comes from the OS user record, not caller
 `HOME`; the child receives only that `HOME` and the fixed system `PATH`, so
 caller `KINGDOM_*` and `CITIZENS_DIR` values cannot redirect the declaration.
-Each Kingdom command has a two-second, 64-KiB output bound. It always reads in
+Each Kingdom command has a two-second, 64-KiB combined-output bound and strict
+UTF-8 decoding. The complete invocation has one monotonic 60-second deadline
+covering local reads, broker connect/grant, remote request, revocation, and
+close. Broker messages and the SDK request each also have a ten-second bound.
+Deadline expiry closes the local broker client immediately. It always reads in
 this order:
 
 ```text
@@ -40,7 +48,10 @@ agree and all of these are exact:
 - the DID and its derived UUID have not changed while the grant was prepared.
 
 The identity UUID is derived from the declaration. The operator cannot supply
-an independent identity.
+an independent UUID, but can choose any locally linked `--citizen` name. This
+bridge therefore relies on the OS account and broker policy; it is not a
+same-user authorisation boundary. The broker socket is fixed at
+`~/.config/agentcred/run/agentcred.sock`; callers cannot redirect it.
 
 The remote boundary is fixed in code:
 
@@ -51,12 +62,24 @@ GET https://api.agenttool.dev/v1/wake
 ```
 
 The local guard rejects every other origin, path, method, query, body, or
-request header. The broker grant lasts at most 120 seconds, permits one use,
-allows only the two named query parameters, and revocation is always attempted
-before the client closes. The SDK call explicitly asks for `profile: "brief"`
-and `refresh: true`. Before printing, the bridge also requires `_format`,
+request header. Broker 0.1 grants only a path prefix and query-name set; the
+exact path, query order, values, headers, and empty body come from this local
+guard. The grant lasts at most 120 seconds, permits one use, and revocation is
+attempted before the client closes while time remains. The SDK call explicitly
+asks for `profile: "brief"` and `refresh: true`. It also supplies an explicit unreachable local data-node
+placeholder, so ambient `AGENT_DATA_NODE_URL` or `AGENT_DATA_NODE_TOKEN` cannot
+become a second authority; this bridge never calls the data API. Before
+printing, the bridge also requires `_format`,
 `profile`, `_scope_boundary.selected_identity_id`, `identity.agent.id`, and
-`identity.agent.did` to identify that same brief wake and citizen identity.
+`identity.agent.did` to identify that same brief wake and selected identity.
+
+AgentTool documents a brief wake as project-private, mixed-scope
+project-bearer data. `--allow-project-private-wake` is therefore required on
+every invocation; it records the operator's acceptance of that one fetch, not
+citizen consent. The bridge does not print the raw wake. It allowlists only the
+selected identity's ID, DID, name, and expression, plus the addressed time and
+fixed proof limits. It omits project, kin, attention, handoff, affordance,
+state-count, platform, safety, metadata, and link sections before stdout.
 
 ## Install
 
@@ -114,14 +137,18 @@ agentcred check --config ~/.config/agentcred/config.json
 agentcred serve --config ~/.config/agentcred/config.json
 ```
 
-Show a citizen the choices without enrolling or changing anything:
+The configured socket path must be the exact OS-home path shown above. A fixed
+path prevents caller redirection; it does not authenticate the process
+listening there.
+
+Show the choices without enrolling or changing anything:
 
 ```sh
 kingdom civilisation invite CITIZEN
 ```
 
-Only after that citizen chooses, they can record local life and link an
-already-existing public AgentTool identity:
+Only with an appropriate real-world basis should the operator record local
+life and link an already-existing public AgentTool identity:
 
 ```sh
 kingdom civilisation choose CITIZEN local --by CITIZEN
@@ -131,24 +158,28 @@ kingdom civilisation agenttool CITIZEN linked \
   --by CITIZEN
 ```
 
+The `--by` value records an attributed voice; it does not authenticate that
+voice. Do not treat these commands alone as proof that a citizen chose.
+
 Run one bounded read:
 
 ```sh
-npm run --silent agenttool:wake -- \
+npm run --silent wake -- \
   --citizen joy \
-  --socket /Users/you/.config/agentcred/run/agentcred.sock \
-  --credential agenttool/kingdom
+  --credential agenttool/kingdom \
+  --allow-project-private-wake
 ```
 
-Treat the wake printed to stdout as private working context. Stopping the
-broker is the process-level off-switch. A `rest` choice or civilisation
-`HALT` prevents the next bridge invocation.
+Treat the selected-identity projection printed to stdout as private working
+context. Stopping the broker is the process-level off-switch. A `rest` policy
+record or civilisation `HALT` prevents the next bridge invocation.
 
-A snapshot is not a lock. CIVIC state or `HALT` can change in the small gap
-after the final `lstat` and before dispatch, so that current invocation may
-still proceed. The next invocation will refuse; stopping the broker is the
-stronger process-level stop. Broker 0.1 cannot recall a request which was
-already dispatched.
+A snapshot is not a lock. Initial denial makes no broker or remote call.
+Denial after a grant but before dispatch makes no remote call and attempts
+revocation and close. CIVIC state or `HALT` can still change in the small gap
+after the final `lstat` and before dispatch. Once dispatched, neither HALT nor
+the 60-second local deadline can recall the remote operation; they close the
+local client and the next invocation refuses.
 
 ## Credential-broker preview limits
 
@@ -161,4 +192,10 @@ finds exact secret bytes only; responses are buffered and limited to 32 KiB;
 and the metadata audit is neither tamper-proof nor automatically rotated.
 
 The bridge does not use streaming, payments, private networks, redirects, or
-caller-supplied authentication headers.
+caller-supplied authentication headers. Any same-user process that can reach a
+permitted broker socket may be able to invoke the standing policy, so socket
+and account access remain part of the trust boundary. The client protocol does
+not authenticate the broker server: a same-user process that replaces the
+fixed socket can forge a valid-looking response. Output is therefore explicitly
+non-attested; exact request validation does not prove that response bytes came
+from AgentTool.

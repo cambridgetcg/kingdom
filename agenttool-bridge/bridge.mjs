@@ -1,7 +1,8 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { lstat } from "node:fs/promises";
 import { userInfo } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 
 import { AgentCredClient } from "@agenttool/credential-broker";
 import { AgentTool } from "@agenttool/sdk";
@@ -13,12 +14,26 @@ export const GRANT_MAX_USES = 1;
 export const ACCOUNT_HOME = userInfo().homedir;
 export const KINGDOM_EXECUTABLE = join(ACCOUNT_HOME, ".local", "bin", "kingdom");
 export const KINGDOM_HALT_PATH = join(ACCOUNT_HOME, "love-unlimited", "HALT");
+export const BROKER_SOCKET_PATH = join(
+  ACCOUNT_HOME,
+  ".config",
+  "agentcred",
+  "run",
+  "agentcred.sock",
+);
 export const KINGDOM_COMMAND_ENV = Object.freeze({
   HOME: ACCOUNT_HOME,
   PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
 });
 export const KINGDOM_COMMAND_TIMEOUT_MS = 2_000;
 export const MAX_KINGDOM_OUTPUT_BYTES = 64 * 1024;
+export const BRIDGE_OPERATION_TIMEOUT_MS = 60_000;
+export const BROKER_REQUEST_TIMEOUT_MS = 10_000;
+export const AGENTTOOL_REQUEST_TIMEOUT_SECONDS = 10;
+export const NO_AMBIENT_DATA_NODE = Object.freeze({
+  baseUrl: "http://127.0.0.1:1",
+  timeout: 1,
+});
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const AGENTTOOL_DID_RE =
@@ -100,37 +115,94 @@ export function validateShow(show, expectedCitizen) {
 function validateOptions(options) {
   if (!isRecord(options)) throw new BridgeError("bridge options are required.");
   const citizen = exactPlainText(options.citizen, "citizen", 120);
-  const socketPath = exactPlainText(options.socketPath, "broker socket path", 4096);
   const credential = exactPlainText(options.credential, "broker credential reference", 256);
-  if (!isAbsolute(socketPath)) {
-    throw new BridgeError("broker socket path must be absolute.");
+  if (Object.hasOwn(options, "socketPath")) {
+    throw new BridgeError(`broker socket is fixed at ${BROKER_SOCKET_PATH}.`);
   }
-  return { citizen, socketPath, credential };
+  if (options.allowProjectPrivateWake !== true) {
+    throw new BridgeError(
+      "one invocation requires --allow-project-private-wake because AgentTool brief wake is project-private and mixed-scope data.",
+    );
+  }
+  return { citizen, credential };
 }
 
-function productionCommandReader(_executable, args, limits) {
+function killProcessGroup(child) {
+  if (!Number.isInteger(child?.pid)) return;
+  try {
+    process.kill(-child.pid, "SIGKILL");
+  } catch (error) {
+    if (error?.code !== "ESRCH") {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The bounded command still reports failure below.
+      }
+    }
+  }
+}
+
+export function runBoundedProcess(executable, args, limits) {
   return new Promise((resolve, reject) => {
-    execFile(
-      KINGDOM_EXECUTABLE,
-      args,
-      {
-        encoding: "utf8",
-        timeout: limits.timeoutMs,
-        maxBuffer: limits.maxOutputBytes,
-        killSignal: "SIGKILL",
+    let child;
+    try {
+      child = spawn(executable, args, {
+        detached: true,
         windowsHide: true,
         shell: false,
         env: limits.env,
-      },
-      (error, stdout) => {
-        if (error) {
-          reject(new BridgeError("fixed Kingdom command failed or exceeded its bound."));
-          return;
-        }
-        resolve(stdout);
-      },
-    );
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch {
+      reject(new BridgeError("fixed Kingdom command failed or exceeded its bound."));
+      return;
+    }
+
+    const stdout = [];
+    let outputBytes = 0;
+    let boundedFailure = false;
+    let settled = false;
+    const failBounded = () => {
+      boundedFailure = true;
+      killProcessGroup(child);
+    };
+    const timer = setTimeout(failBounded, limits.timeoutMs);
+    const countOutput = (chunk, keep) => {
+      outputBytes += chunk.length;
+      if (outputBytes > limits.maxOutputBytes) {
+        failBounded();
+      } else if (keep) {
+        stdout.push(chunk);
+      }
+    };
+
+    child.stdout.on("data", (chunk) => countOutput(chunk, true));
+    child.stderr.on("data", (chunk) => countOutput(chunk, false));
+    child.on("error", () => {
+      clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      reject(new BridgeError("fixed Kingdom command failed or exceeded its bound."));
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      if (boundedFailure || code !== 0) {
+        reject(new BridgeError("fixed Kingdom command failed or exceeded its bound."));
+        return;
+      }
+      try {
+        resolve(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(stdout)));
+      } catch {
+        reject(new BridgeError("fixed Kingdom command output is not valid UTF-8."));
+      }
+    });
   });
+}
+
+export function productionCommandReader(_executable, args, limits) {
+  return runBoundedProcess(KINGDOM_EXECUTABLE, args, limits);
 }
 
 async function readKingdomObject(commandReader, args, label) {
@@ -189,12 +261,12 @@ export function buildGrantRequest(credential) {
       maxRequestBytes: 0,
       maxResponseBytes: 32 * 1024,
     },
-    rationale: "Read one fresh brief wake after an explicit local linked citizen snapshot.",
+    rationale: "Read one fresh brief wake after an owner-operated local linked-policy snapshot.",
   };
 }
 
 /**
- * Keep the SDK inside the single operation the citizen selected.
+ * Keep the SDK inside the single operation the local operator selected.
  *
  * The broker grant is already narrow. This second, local boundary is exact:
  * it rejects even another path underneath /v1/wake and even another value for
@@ -263,6 +335,108 @@ export function validateWakeIdentity(wake, identityId, did) {
   return wake;
 }
 
+export function projectSelectedIdentityWake(wake, identityId, did) {
+  validateWakeIdentity(wake, identityId, did);
+  const agent = wake.identity.agent;
+  const name = exactPlainText(agent.name, "wake identity name", 255);
+  const expression = wake.identity.expression ?? null;
+  if (expression !== null && !isRecord(expression)) {
+    throw new BridgeError("wake selected-identity expression must be an object or null.");
+  }
+  const addressedAt =
+    wake.addressed_at === undefined || wake.addressed_at === null
+      ? null
+      : exactPlainText(wake.addressed_at, "wake addressed_at", 64);
+
+  return {
+    schema: "kingdom.agenttool-selected-identity-wake/1",
+    addressed_at: addressedAt,
+    source: {
+      format: "wake-brief/v1",
+      profile: "brief",
+      selected_identity_id: identityId,
+      attested: false,
+    },
+    identity: {
+      agent: { id: identityId, did, name },
+      expression,
+    },
+    proof_limits: [
+      "The local policy is an attributed operator record, not citizen authentication or continuing consent.",
+      "The hosted response is project-bearer data and does not prove identity, authority, truth, or inner state.",
+      "Project-private and mixed-scope wake data was fetched only after explicit operator acceptance, then omitted before output.",
+      "The fixed local broker socket does not authenticate its server; same-user socket replacement can forge this non-attested output.",
+    ],
+  };
+}
+
+function makeDeadline(timeoutMs) {
+  if (
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs <= 0 ||
+    timeoutMs > BRIDGE_OPERATION_TIMEOUT_MS
+  ) {
+    throw new BridgeError(
+      `whole-operation timeout must be 1–${BRIDGE_OPERATION_TIMEOUT_MS} milliseconds.`,
+    );
+  }
+  return {
+    expiresAt: performance.now() + timeoutMs,
+    expired: false,
+  };
+}
+
+function forceBrokerClose(broker) {
+  if (!broker || typeof broker.close !== "function") return;
+  try {
+    const result = broker.close();
+    if (result && typeof result.then === "function") {
+      void result.catch(() => {});
+    }
+  } catch {
+    // The original failure and deadline remain the useful result.
+  }
+}
+
+function expireDeadline(deadline, broker) {
+  deadline.expired = true;
+  forceBrokerClose(broker);
+}
+
+function checkDeadline(deadline, broker, label) {
+  if (deadline.expired || performance.now() >= deadline.expiresAt) {
+    expireDeadline(deadline, broker);
+    throw new BridgeError(
+      `${label} exceeded the bridge's whole-operation deadline.`,
+    );
+  }
+}
+
+async function beforeDeadline(deadline, broker, label, operation) {
+  checkDeadline(deadline, broker, label);
+  const remaining = Math.max(1, Math.ceil(deadline.expiresAt - performance.now()));
+  let timer;
+  try {
+    const value = await Promise.race([
+      Promise.resolve().then(operation),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          expireDeadline(deadline, broker);
+          reject(
+            new BridgeError(
+              `${label} exceeded the bridge's whole-operation deadline.`,
+            ),
+          );
+        }, remaining);
+      }),
+    ]);
+    checkDeadline(deadline, broker, label);
+    return value;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function combineErrors(operationError, cleanupErrors) {
   if (operationError && cleanupErrors.length > 0) {
     return new AggregateError(
@@ -279,26 +453,35 @@ function combineErrors(operationError, cleanupErrors) {
 }
 
 /**
- * Fetch one structured, brief, uncached wake for one explicitly linked citizen.
+ * Fetch one structured, brief, uncached wake selected by local policy, then
+ * return only the selected-identity projection.
  *
  * Initial validation finishes before the broker object is created. An
  * initially off, unasked, halted, mismatched, or malformed declaration
  * therefore cannot make a local broker call or a remote HTTP call.
  */
 export async function fetchCitizenWake(options, dependencies = {}) {
-  const { citizen, socketPath, credential } = validateOptions(options);
+  const deadline = makeDeadline(
+    dependencies.operationTimeoutMs ?? BRIDGE_OPERATION_TIMEOUT_MS,
+  );
+  const { citizen, credential } = validateOptions(options);
   const commandReader = dependencies.commandReader ?? productionCommandReader;
   const haltReader = dependencies.haltReader ?? lstat;
-  const { identityId, did } = await readCitizenSnapshot(
-    citizen,
-    commandReader,
-    haltReader,
+  const { identityId, did } = await beforeDeadline(
+    deadline,
+    undefined,
+    "initial local policy read",
+    () => readCitizenSnapshot(citizen, commandReader, haltReader),
   );
   const brokerFactory =
     dependencies.brokerFactory ??
     ((clientOptions) => new AgentCredClient(clientOptions));
+  const agenttoolFactory =
+    dependencies.agenttoolFactory ??
+    ((clientOptions) => new AgentTool(clientOptions));
   const broker = brokerFactory({
-    socketPath,
+    socketPath: BROKER_SOCKET_PATH,
+    timeoutMs: BROKER_REQUEST_TIMEOUT_MS,
     clientName: "kingdom-agenttool-bridge/1",
   });
 
@@ -306,36 +489,64 @@ export async function fetchCitizenWake(options, dependencies = {}) {
   let wake;
   let operationError;
   try {
-    await broker.connect();
-    grant = await broker.requestGrant(buildGrantRequest(credential));
+    await beforeDeadline(deadline, broker, "broker connect", () =>
+      broker.connect(),
+    );
+    grant = await beforeDeadline(deadline, broker, "broker grant", () =>
+      broker.requestGrant(buildGrantRequest(credential)),
+    );
     const transport = guardWakeTransport(broker.asTransport(grant), identityId);
-    const agenttool = new AgentTool({ transport });
-    const current = await readCitizenSnapshot(citizen, commandReader, haltReader);
+    const agenttool = agenttoolFactory({
+      transport,
+      baseUrl: AGENTTOOL_ORIGIN,
+      timeout: AGENTTOOL_REQUEST_TIMEOUT_SECONDS,
+      dataNode: NO_AMBIENT_DATA_NODE,
+    });
+    const current = await beforeDeadline(
+      deadline,
+      broker,
+      "pre-dispatch local policy read",
+      () => readCitizenSnapshot(citizen, commandReader, haltReader),
+    );
     if (current.identityId !== identityId || current.did !== did) {
       throw new BridgeError("Kingdom AgentTool identity changed while the grant was being prepared.");
     }
-    wake = await agenttool.wake.get({
-      identityId,
-      profile: "brief",
-      refresh: true,
-    });
-    validateWakeIdentity(wake, identityId, did);
+    const remoteWake = await beforeDeadline(
+      deadline,
+      broker,
+      "AgentTool wake request",
+      () =>
+        agenttool.wake.get({
+          identityId,
+          profile: "brief",
+          refresh: true,
+        }),
+    );
+    wake = projectSelectedIdentityWake(remoteWake, identityId, did);
   } catch (error) {
     operationError = error;
   }
 
   const cleanupErrors = [];
-  if (grant !== undefined) {
+  if (!deadline.expired && grant !== undefined) {
     try {
-      await broker.revoke(grant);
+      await beforeDeadline(deadline, broker, "broker grant revocation", () =>
+        broker.revoke(grant),
+      );
     } catch (error) {
       cleanupErrors.push(error);
     }
   }
-  try {
-    await broker.close();
-  } catch (error) {
-    cleanupErrors.push(error);
+  if (!deadline.expired) {
+    try {
+      await beforeDeadline(deadline, broker, "broker close", () =>
+        broker.close(),
+      );
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  } else {
+    forceBrokerClose(broker);
   }
 
   const failure = combineErrors(operationError, cleanupErrors);

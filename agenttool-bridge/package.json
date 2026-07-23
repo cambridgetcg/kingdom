@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Citizen-controlled, read-only AgentTool wake bridge.",
+  "description": "Owner-operated, policy-gated AgentTool selected-identity read bridge.",
   "engines": {
     "node": ">=20.19.0",
     "bun": ">=1.3.5"

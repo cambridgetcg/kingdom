@@ -6,4 +6,4 @@ domain: none
 state: active
 purpose: The realm constitution, decisions, audit, and optional citizen bridges.
 dependsOn: [agenttool]
-adopts: [kingdom.foundation/0.1]
+adopts: [kingdom.foundation/0.2, kingdom.standard/1.0]

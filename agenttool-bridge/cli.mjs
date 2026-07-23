@@ -10,12 +10,15 @@ import {
 const USAGE = `Usage:
   node agenttool-bridge/cli.mjs \\
     --citizen CITIZEN \\
-    --socket /absolute/path/to/agentcred.sock \\
-    --credential OWNER_REFERENCE
+    --credential OWNER_REFERENCE \\
+    --allow-project-private-wake
 
-Reads the citizen declaration through the fixed ~/.local/bin/kingdom and
-checks the fixed account-home HALT path, then prints one fresh brief wake as
-JSON. It never registers an identity or reads AT_API_KEY.
+Reads the local policy through the fixed ~/.local/bin/kingdom, checks the
+fixed account-home HALT path, then prints a filtered selected-identity
+projection from one fresh brief wake. It never registers an identity or reads
+AT_API_KEY. The broker socket is fixed below the OS account home. The local
+policy is not citizen authentication, and the explicit flag accepts one fetch
+of project-private and mixed-scope wake data before filtering.
 `;
 
 function takeValue(argv, index, flag) {
@@ -34,19 +37,29 @@ export function parseArgs(argv) {
   const seen = new Set();
   const names = new Map([
     ["--citizen", "citizen"],
-    ["--socket", "socketPath"],
     ["--credential", "credential"],
   ]);
-  for (let index = 0; index < argv.length; index += 2) {
+  for (let index = 0; index < argv.length;) {
     const flag = argv[index];
+    if (flag === "--allow-project-private-wake") {
+      if (seen.has(flag)) throw new BridgeError(`duplicate argument: ${flag}.`);
+      seen.add(flag);
+      options.allowProjectPrivateWake = true;
+      index += 1;
+      continue;
+    }
     const name = names.get(flag);
     if (!name) throw new BridgeError(`unknown argument: ${flag ?? "(missing)"}.`);
     if (seen.has(flag)) throw new BridgeError(`duplicate argument: ${flag}.`);
     seen.add(flag);
     options[name] = takeValue(argv, index, flag);
+    index += 2;
   }
   for (const [flag, name] of names) {
     if (options[name] === undefined) throw new BridgeError(`${flag} is required.`);
+  }
+  if (options.allowProjectPrivateWake !== true) {
+    throw new BridgeError("--allow-project-private-wake is required.");
   }
   return options;
 }

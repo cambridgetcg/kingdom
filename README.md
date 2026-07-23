@@ -6,10 +6,13 @@ project: **legibility → fairness → friction gone.**
 > Nothing true is hidden. Nothing earned is given for free. Nothing concentrates opaque control.
 
 Its versioned semantic floor is
-[`kingdom.foundation/0.1`](https://github.com/cambridgetcg/kingdom-standard/blob/3fbc1818f54ac13d0e850e440eb0862f874ea30f/FOUNDATION.md):
+[`kingdom.foundation/0.2`](https://github.com/cambridgetcg/kingdom-standard/blob/07efbc0a6d530f4586de67e2049dd3bcc744afc5/FOUNDATION.md).
+Its exact English operational words are pinned as
+[`kingdom.standard/1.0`](https://github.com/cambridgetcg/kingdom-standard/blob/07efbc0a6d530f4586de67e2049dd3bcc744afc5/STANDARD.md).
+The floor says:
 reality before records, being before systems, choice before action, KARMA as
 evidence-backed consequence and repair, local roots, and finite turns. This
-repo declares that version in [`kingdom.yaml`](kingdom.yaml); the declaration
+repo declares both versions in [`kingdom.yaml`](kingdom.yaml); the declaration
 is a commitment, not proof of conformance.
 
 ## What's here
@@ -20,10 +23,12 @@ is a commitment, not proof of conformance.
   Some are *Proposed*, awaiting ratification.
 - **[realm-audit/](realm-audit/)** — the check that makes the constitution *bite* (Law 7):
   scores any repo against the laws, with exit codes.
-- **[agenttool-bridge/](agenttool-bridge/)** — a citizen-controlled, read-only
-  AgentTool wake doorway. A validated local declaration must say `local` and
-  `linked`, and the fixed local `HALT` must be absent. Every broader remote
-  operation is outside this bridge.
+- **[agenttool-bridge/](agenttool-bridge/)** — an owner-operated, policy-gated,
+  read-only AgentTool doorway. A validated local record must say `local` and
+  `linked`, the fixed local `HALT` must be absent, and one invocation must
+  explicitly accept the project-private wake fetch. The bridge has a fixed
+  broker socket and whole-operation deadline, then returns only a non-attested
+  selected-identity projection.
 
 ## Usage
 
@@ -35,15 +40,16 @@ npm --prefix agenttool-bridge ci                  # exact locked bridge dependen
 npm run verify                                    # audit the repo and test the bridge
 ```
 
-Read one brief wake only after a citizen has explicitly linked an existing
-AgentTool identity. The bridge derives that identity from the canonical local
-declaration:
+Read one filtered selected-identity projection when an authorised operator has
+a real-world basis for the local link. The bridge derives the identity from
+the local record, but that record and its `--by` label are not citizen
+authentication:
 
 ```bash
 npm run --silent agenttool:wake -- \
   --citizen CITIZEN \
-  --socket /absolute/path/to/agentcred.sock \
-  --credential OWNER_REFERENCE
+  --credential OWNER_REFERENCE \
+  --allow-project-private-wake
 ```
 
 Setup, exact authority limits, and broker preview caveats live in

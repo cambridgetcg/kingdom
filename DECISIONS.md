@@ -90,5 +90,67 @@ one-use, and honest about that limit.
 
 ---
 
+## ADR-0004 — Version operational meaning; narrow the AgentTool read
+
+**Status:** Accepted · 2026-07-23
+
+**Supersedes:** ADR-0003 only where it names foundation 0.1 as current or
+describes the AgentTool bridge as citizen-controlled.
+
+**Context.** Review found that a foundation-only pin did not freeze the
+forty-two laws or checklist. It also found that the local civilisation
+declaration's `--by` label is attribution rather than authentication, the
+credential broker preview is not a same-user sandbox, and AgentTool's brief
+wake contains project-scoped and mixed-scope sections beyond the selected
+identity.
+
+**Decision.** The reviewed local release is `kingdom.foundation/0.2` together
+with `kingdom.standard/1.0`; a conformance claim pins both. Its amendment
+receipt retains the demonstrated failures and 0.1 lineage. The public remote
+still serves 0.1 until the standard release is pushed, so publication and this
+adoption must be coordinated and verified rather than described as atomic.
+
+The bridge is owner-operated and policy-gated, not citizen-authenticated. It
+still derives the identity from the local record, checks `HALT`, uses one
+short-lived read-only broker grant, and validates the selected identity. It
+then outputs only ID, DID, name, and the selected identity's expression.
+Project, kin, attention, handoff, affordance, count, metadata, and link
+sections are dropped. A policy record or hosted response proves neither
+citizen choice nor continuing consent.
+
+**Consequences.** The operational words cannot drift under one conformance
+identifier. The bridge remains useful for one bounded selected-identity read
+without silently disclosing the rest of a project wake. Same-user access to
+the broker socket remains inside the owner's trust boundary; authenticated
+citizen control would require a separate future mechanism.
+
+---
+
+## ADR-0005 — Bound and name the local broker trust
+
+**Status:** Accepted · 2026-07-23
+
+**Context.** A caller-selected socket let the caller choose the process that
+answered as the credential broker. Broker connect, grant, request, revoke, and
+close also lacked one shared deadline. Finally, fetching a brief wake reads
+project-private and mixed-scope bytes even when the final projection omits
+them.
+
+**Decision.** The bridge fixes the broker socket below the OS account home and
+rejects caller socket input. Every invocation must explicitly accept one
+project-private wake fetch. One monotonic 60-second deadline covers the whole
+operation; broker messages and the SDK request also have ten-second bounds.
+Expiry closes the local client. Output says it is non-attested because the
+broker protocol does not authenticate the server process at that socket.
+
+**Consequences.** Callers cannot redirect the bridge to an arbitrary socket,
+no await can keep the operation alive indefinitely, and the privacy cost is
+named at the call site. A same-user process that replaces the fixed socket can
+still forge output, and no local stop can recall a request already dispatched.
+Those limits remain visible rather than being promoted into identity or remote
+attestation.
+
+---
+
 *Append the next decision below. Ratify a Proposed record by changing its status to
 `Accepted` (and dating it); never rewrite an Accepted one.*
