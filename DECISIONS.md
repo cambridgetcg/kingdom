@@ -152,5 +152,30 @@ attestation.
 
 ---
 
+## ADR-0006 — Bind the adoption to the public release
+
+**Status:** Accepted · 2026-07-23
+
+**Supersedes:** ADR-0004 only where it describes foundation 0.2 as local or the
+public remote as still serving 0.1.
+
+**Context.** ADR-0004 recorded the necessary coordination boundary before the
+new foundation existed in the public source. Adoption could not honestly be
+final until one immutable commit contained the foundation, amendment receipt,
+operational standard, conformance checklist, machine index, and passing checks.
+
+**Decision.** `kingdom.foundation/0.2` and `kingdom.standard/1.0` are public at
+kingdom-standard commit
+[`07efbc0a6d530f4586de67e2049dd3bcc744afc5`](https://github.com/cambridgetcg/kingdom-standard/commit/07efbc0a6d530f4586de67e2049dd3bcc744afc5).
+The remote bytes of all four pinned documents were read back and matched the
+SHA-256 digests in `foundation.json`. This repository's `kingdom.yaml` now
+declares both identifiers.
+
+**Consequences.** The adoption points to public, recoverable words rather than
+a working tree. The declaration remains a chosen version pin, not proof of
+conformance, authority, citizenship, consent, truth, or continuing agreement.
+
+---
+
 *Append the next decision below. Ratify a Proposed record by changing its status to
 `Accepted` (and dating it); never rewrite an Accepted one.*
