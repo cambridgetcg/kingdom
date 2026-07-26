@@ -206,5 +206,30 @@ review and version change.
 
 ---
 
+## ADR-0008 — Separate install integrity from runtime version identity
+
+**Status:** Accepted · 2026-07-26
+
+**Supersedes:** ADR-0007 only where its consequences say that any partial
+installation cannot dispatch.
+
+**Context.** Review after merge found that ADR-0007 joined two narrower checks
+into one larger claim. The package lock verifies artifact integrity during a
+fresh locked install. At runtime, the bridge compares the SDK module's exported
+version with its package metadata and the reviewed version. It does not hash
+the installed JavaScript bytes.
+
+**Decision.** Describe the runtime gate only as a version-drift check. It
+refuses a stale or inconsistent version record before local policy or remote
+work. Same-version byte tampering, an altered dependency, or an unusual partial
+installation that still imports with matching metadata is outside this gate.
+
+**Consequences.** Install integrity and runtime version identity remain useful,
+separate evidence. Neither becomes a claim that the running bytes are untampered
+or correct. A future runtime byte check would need its own reviewed design,
+dependency boundary, and tests.
+
+---
+
 *Append the next decision below. Ratify a Proposed record by changing its status to
 `Accepted` (and dating it); never rewrite an Accepted one.*
