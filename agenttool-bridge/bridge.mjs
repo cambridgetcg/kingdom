@@ -1,13 +1,16 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { userInfo } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
+import { fileURLToPath } from "node:url";
 
 import { AgentCredClient } from "@agenttool/credential-broker";
-import { AgentTool } from "@agenttool/sdk";
+import { AgentTool, SDK_VERSION } from "@agenttool/sdk";
 
 export const AGENTTOOL_ORIGIN = "https://api.agenttool.dev";
+export const EXPECTED_AGENTTOOL_SDK_VERSION = "0.16.3";
 export const WAKE_PATH = "/v1/wake";
 export const GRANT_TTL_SECONDS = 120;
 export const GRANT_MAX_USES = 1;
@@ -40,7 +43,7 @@ const AGENTTOOL_DID_RE =
   /^did:at:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 const EXPECTED_HEADERS = new Map([
   ["content-type", "application/json"],
-  ["x-agenttool-client", "agenttool-sdk-ts/0.16.0"],
+  ["x-agenttool-client", `agenttool-sdk-ts/${EXPECTED_AGENTTOOL_SDK_VERSION}`],
 ]);
 
 export class BridgeError extends Error {
@@ -48,6 +51,41 @@ export class BridgeError extends Error {
     super(message);
     this.name = "BridgeError";
   }
+}
+
+export function readAgentToolSdkMetadataVersion() {
+  try {
+    const entry = fileURLToPath(import.meta.resolve("@agenttool/sdk"));
+    const metadataPath = resolve(dirname(entry), "..", "package.json");
+    const bytes = readFileSync(metadataPath);
+    if (bytes.length > 64 * 1024) {
+      throw new Error("package metadata exceeds 64 KiB");
+    }
+    const metadata = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    if (!isRecord(metadata) || typeof metadata.version !== "string") {
+      throw new Error("package metadata has no version");
+    }
+    return metadata.version;
+  } catch {
+    throw new BridgeError("installed AgentTool SDK metadata is unreadable; refusing to dispatch.");
+  }
+}
+
+export function validateAgentToolSdkVersion({
+  moduleVersion = SDK_VERSION,
+  metadataVersion = readAgentToolSdkMetadataVersion(),
+} = {}) {
+  if (
+    moduleVersion !== EXPECTED_AGENTTOOL_SDK_VERSION ||
+    metadataVersion !== EXPECTED_AGENTTOOL_SDK_VERSION ||
+    moduleVersion !== metadataVersion
+  ) {
+    throw new BridgeError(
+      `AgentTool SDK version mismatch: expected ${EXPECTED_AGENTTOOL_SDK_VERSION}, ` +
+        `module says ${String(moduleVersion)}, metadata says ${String(metadataVersion)}.`,
+    );
+  }
+  return EXPECTED_AGENTTOOL_SDK_VERSION;
 }
 
 function isRecord(value) {
@@ -464,6 +502,7 @@ export async function fetchCitizenWake(options, dependencies = {}) {
   const deadline = makeDeadline(
     dependencies.operationTimeoutMs ?? BRIDGE_OPERATION_TIMEOUT_MS,
   );
+  validateAgentToolSdkVersion();
   const { citizen, credential } = validateOptions(options);
   const commandReader = dependencies.commandReader ?? productionCommandReader;
   const haltReader = dependencies.haltReader ?? lstat;

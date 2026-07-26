@@ -177,5 +177,34 @@ conformance, authority, citizenship, consent, truth, or continuing agreement.
 
 ---
 
+## ADR-0007 — Pin the reviewed AgentTool distribution
+
+**Status:** Accepted · 2026-07-26
+
+**Supersedes:** ADR-0003 only where it names AgentTool SDK 0.16.0 as the
+bridge's current dependency.
+
+**Context.** The bridge still installed SDK 0.16.0 from npm after AgentTool
+had published 0.16.3. Its expected HTTP client header repeated the version by
+hand, so installed code and the guard could drift while each looked valid.
+On 2026-07-26, 0.16.3 was the latest GitHub SDK release and its runtime tree
+still matched AgentTool `main`; the npm mirror was behind.
+
+**Decision.** Install the publisher's exact 0.16.3 release artifact and record
+its independently checked SHA-256. The lock records its package integrity; the
+bridge also compares the module's exported version, installed package metadata,
+and reviewed version before any local policy read or remote request. A mismatch
+fails closed. The existing read-only wake route, one-use broker grant, output
+filter, deadline, and HALT checks do not widen.
+
+**Consequences.** The guard and the code it guards now name one release, and a
+partial or stale installation cannot dispatch. The reviewed artifact's
+SHA-256 equality across the GitHub release and publisher manifest identifies
+the same bytes; it does not prove source provenance, correctness, identity,
+authority, consent, or truth. Future SDK changes still require an explicit
+review and version change.
+
+---
+
 *Append the next decision below. Ratify a Proposed record by changing its status to
 `Accepted` (and dating it); never rewrite an Accepted one.*

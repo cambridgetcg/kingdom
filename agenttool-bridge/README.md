@@ -90,8 +90,25 @@ npm test
 npm run test:bun
 ```
 
-The lockfile pins `@agenttool/sdk` 0.16.0 and
-`@agenttool/credential-broker` 0.1.0 exactly.
+The lockfile pins `@agenttool/sdk` 0.16.3 from the publisher's exact release
+artifact and `@agenttool/credential-broker` 0.1.0 exactly:
+
+```text
+https://docs.agenttool.dev/packages/v1/@agenttool/sdk/0.16.3/agenttool-sdk-0.16.3.tgz
+sha256:344176dfc6378c3eac8c284b0e7ca075e3bd3c7f5b9d462a3936421c0f5f50da
+source revision: 23dc452a22e9e12200455c9791cc2db4fdfbf5a7
+```
+
+Those values were checked against the
+[GitHub 0.16.3 release](https://github.com/cambridgetcg/agenttool/releases/tag/sdk-v0.16.3)
+and the
+[publisher manifest](https://raw.githubusercontent.com/cambridgetcg/agenttool/ef867d6aad20d4021fc231c6f11655cfcb5ff814/apps/docs/packages/v1/@agenttool/sdk/0.16.3/manifest.json)
+on 2026-07-26. The release was newer than the npm
+mirror, so the bridge does not install `@agenttool/sdk` by an npm version
+range. Before any local policy read or remote dispatch, it requires the
+module's exported version, installed package metadata, and reviewed version
+to agree. Matching versions and digests identify bytes; they do not prove
+source provenance, correctness, or safety.
 
 ## Owner setup
 
