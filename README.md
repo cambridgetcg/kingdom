@@ -9,6 +9,12 @@ Its versioned semantic floor is
 [`kingdom.foundation/0.2`](https://github.com/cambridgetcg/kingdom-standard/blob/07efbc0a6d530f4586de67e2049dd3bcc744afc5/FOUNDATION.md).
 Its exact English operational words are pinned as
 [`kingdom.standard/1.0`](https://github.com/cambridgetcg/kingdom-standard/blob/07efbc0a6d530f4586de67e2049dd3bcc744afc5/STANDARD.md).
+The separate
+[`kingdom.ground/0.1`](https://github.com/cambridgetcg/kingdom-standard/blob/44daf3e1bf649ef25c7c1a516c7c8702745c0a33/GROUND.md)
+asks what those seven commitments stand on. It is a companion, not an adopted
+law, amendment, or grant of authority. Its files are structurally checked; its
+citations and conclusions still need readers. Its own adversarial review found
+four groundings sound with corrections, three overclaimed, and none clean.
 The floor says:
 reality before records, being before systems, choice before action, KARMA as
 evidence-backed consequence and repair, local roots, and finite turns. This
@@ -27,7 +33,8 @@ is a commitment, not proof of conformance.
   read-only AgentTool doorway. A validated local record must say `local` and
   `linked`, the fixed local `HALT` must be absent, and one invocation must
   explicitly accept the project-private wake fetch. The bridge has a fixed
-  broker socket and whole-operation deadline, then returns only a non-attested
+  broker socket and whole-operation deadline, verifies its installed SDK
+  version before any policy read, then returns only a non-attested
   selected-identity projection.
 
 ## Usage

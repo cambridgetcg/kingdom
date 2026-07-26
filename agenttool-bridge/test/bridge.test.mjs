@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { PolicyConsent } from "@agenttool/credential-broker";
-import { AgentTool } from "@agenttool/sdk";
+import { AgentTool, SDK_VERSION } from "@agenttool/sdk";
 
 import {
   AGENTTOOL_ORIGIN,
@@ -14,6 +14,7 @@ import {
   BROKER_SOCKET_PATH,
   BridgeError,
   buildGrantRequest,
+  EXPECTED_AGENTTOOL_SDK_VERSION,
   fetchCitizenWake,
   guardWakeTransport,
   KINGDOM_COMMAND_TIMEOUT_MS,
@@ -24,7 +25,9 @@ import {
   NO_AMBIENT_DATA_NODE,
   parseKingdomJson,
   projectSelectedIdentityWake,
+  readAgentToolSdkMetadataVersion,
   runBoundedProcess,
+  validateAgentToolSdkVersion,
   validateCanonicalIdentityId,
   validateWakeIdentity,
 } from "../bridge.mjs";
@@ -171,6 +174,29 @@ function validOptions() {
   };
 }
 
+test("installed AgentTool SDK metadata and module agree with the reviewed release", () => {
+  assert.equal(EXPECTED_AGENTTOOL_SDK_VERSION, "0.16.3");
+  assert.equal(SDK_VERSION, EXPECTED_AGENTTOOL_SDK_VERSION);
+  assert.equal(readAgentToolSdkMetadataVersion(), EXPECTED_AGENTTOOL_SDK_VERSION);
+  assert.equal(validateAgentToolSdkVersion(), EXPECTED_AGENTTOOL_SDK_VERSION);
+  assert.throws(
+    () =>
+      validateAgentToolSdkVersion({
+        moduleVersion: "0.16.2",
+        metadataVersion: EXPECTED_AGENTTOOL_SDK_VERSION,
+      }),
+    /AgentTool SDK version mismatch/,
+  );
+  assert.throws(
+    () =>
+      validateAgentToolSdkVersion({
+        moduleVersion: EXPECTED_AGENTTOOL_SDK_VERSION,
+        metadataVersion: "0.16.2",
+      }),
+    /AgentTool SDK version mismatch/,
+  );
+});
+
 test("fixed Kingdom reads derive identity, then one exact SDK wake cleans up", async () => {
   const originalFetch = globalThis.fetch;
   const originalAmbient = process.env.AT_API_KEY;
@@ -263,7 +289,10 @@ test("fixed Kingdom reads derive identity, then one exact SDK wake cleans up", a
     assert.equal(request.method, "GET");
     assert.equal(request.body, null);
     assert.equal(request.headers.get("authorization"), null);
-    assert.equal(request.headers.get("x-agenttool-client"), "agenttool-sdk-ts/0.16.0");
+    assert.equal(
+      request.headers.get("x-agenttool-client"),
+      `agenttool-sdk-ts/${EXPECTED_AGENTTOOL_SDK_VERSION}`,
+    );
     assert.equal(
       [...request.headers.values()].includes("ambient-value-must-be-ignored"),
       false,
@@ -582,7 +611,7 @@ test("the local transport guard refuses every target change before forwarding", 
   );
   const headers = {
     "content-type": "application/json",
-    "x-agenttool-client": "agenttool-sdk-ts/0.16.0",
+    "x-agenttool-client": `agenttool-sdk-ts/${EXPECTED_AGENTTOOL_SDK_VERSION}`,
   };
   const exact =
     `${AGENTTOOL_ORIGIN}/v1/wake?identity_id=${IDENTITY_ID}&profile=brief`;
