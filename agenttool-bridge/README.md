@@ -107,8 +107,11 @@ on 2026-07-26. The release was newer than the npm
 mirror, so the bridge does not install `@agenttool/sdk` by an npm version
 range. Before any local policy read or remote dispatch, it requires the
 module's exported version, installed package metadata, and reviewed version
-to agree. Matching versions and digests identify bytes; they do not prove
-source provenance, correctness, or safety.
+to agree. That runtime check detects version drift; it does not hash installed
+JavaScript or detect same-version tampering. Lock integrity is checked during a
+fresh locked install. Matching versions and digests identify records and
+artifacts within those separate checks; they do not prove source provenance,
+runtime byte integrity, correctness, or safety.
 
 ## Owner setup
 
