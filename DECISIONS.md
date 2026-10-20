@@ -10,7 +10,7 @@ load-bearing. Law 1: decisions are legible, not folklore.)*
 
 ## ADR-0001 — One canonical Proof-of-Truth chain
 
-**Status:** Proposed
+**Status:** Superseded (2026-10-20): the one canonical chain is the zerone lineage; legible-money is not maintained as a competing chain; LEGIBLE remains the realm/OS name. This is an agent's call under Yu's 2026-10-20 delegation (decisions ledger `kingdom-adr-0001`), not Yu's ratification, and Yu overturns it by saying so.
 
 **Context.** `zerone` and `legible-money` are the *same* chain built twice — both
 Cosmos-SDK Proof-of-Truth blockchains where verification is consensus, agents are
